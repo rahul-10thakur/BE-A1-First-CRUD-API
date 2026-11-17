@@ -1,316 +1,146 @@
-// Task API — SQLite-backed CRUD server
-
+// Task API — PostgreSQL-backed CRUD server
 const express = require('express');
-const Database = require('better-sqlite3');
 const swaggerUi = require('swagger-ui-express');
-const path = require('node:path');
+const { Pool } = require('pg');
 const openapi = require('./openapi.json');
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const databasePath = process.env.DB_PATH || path.join(__dirname, 'tasks.db');
-
+const connectionString = process.env.DATABASE_URL || 'postgres://postgres:dev@localhost:5432/tasks';
+const pool = new Pool({ connectionString });
 app.use(express.json());
 
-// ============================================================
-// Stage 0 — SQLite database
-// ============================================================
-
-const db = new Database(databasePath);
-
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY,
-    title TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0
-  )
-`).run();
-
-// Seed only when database is empty
-const count = db.prepare(
-  'SELECT COUNT(*) AS count FROM tasks'
-).get();
-
-if (count.count === 0) {
-  // A transaction ensures all three seed tasks are inserted together.
-  const seedTasks = db.transaction(() => {
-    const insert = db.prepare(
-      'INSERT INTO tasks (title, done) VALUES (?, ?)'
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      done BOOLEAN NOT NULL DEFAULT FALSE
+    )
+  `);
+  const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM tasks');
+  if (rows[0].count === 0) {
+    await pool.query(
+      `INSERT INTO tasks (title, done) VALUES
+       ($1, $2), ($3, $4), ($5, $6)`,
+      ['Buy groceries', false, 'Walk the dog', true, 'Read a book', false]
     );
-    insert.run('Buy groceries', 0);
-    insert.run('Walk the dog', 1);
-    insert.run('Read a book', 0);
-  });
-  seedTasks();
+  }
 }
-
-// Convert SQLite 0/1 into JSON false/true
-function formatTask(task) {
-  if (!task) return null;
-
-  return {
-    ...task,
-    done: Boolean(task.done),
-  };
-}
-
-// ============================================================
-// Swagger
-// ============================================================
 
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapi));
-
-// ============================================================
-// Home + health
-// ============================================================
-
-app.get('/', (req, res) => {
-  res.json({
-    name: 'Task API',
-    version: '2.0',
-    storage: 'SQLite',
-    endpoints: ['/tasks', '/stats', '/reset'],
-  });
+app.get('/', (req, res) => res.json({
+  name: 'Task API', version: '3.0', storage: 'PostgreSQL',
+  endpoints: ['/tasks', '/stats', '/reset']
+}));
+app.get('/health', async (req, res) => {
+  await pool.query('SELECT 1');
+  res.json({ status: 'ok', db: 'ok' });
 });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-// ============================================================
-// Stage 1 — READ all tasks
-// ============================================================
-
-app.get('/tasks', (req, res) => {
-  let sql = 'SELECT * FROM tasks';
+app.get('/tasks', async (req, res) => {
   const conditions = [];
   const params = [];
-
-  // Optional filter: /tasks?done=true
   if (req.query.done !== undefined) {
     if (req.query.done !== 'true' && req.query.done !== 'false') {
-      return res
-        .status(400)
-        .json({ error: 'done must be true or false' });
+      return res.status(400).json({ error: 'done must be true or false' });
     }
-
-    conditions.push('done = ?');
-    params.push(req.query.done === 'true' ? 1 : 0);
+    params.push(req.query.done === 'true');
+    conditions.push(`done = $${params.length}`);
   }
-
-  // Optional search: /tasks?search=milk
   if (req.query.search !== undefined) {
     const word = String(req.query.search).trim();
-
-    if (word === '') {
-      return res
-        .status(400)
-        .json({ error: 'search must not be empty' });
-    }
-
-    conditions.push('title LIKE ?');
+    if (!word) return res.status(400).json({ error: 'search must not be empty' });
     params.push(`%${word}%`);
+    conditions.push(`title ILIKE $${params.length}`);
   }
-
-  if (conditions.length > 0) {
-    sql += ' WHERE ' + conditions.join(' AND ');
-  }
-
-  const tasks = db.prepare(sql).all(...params);
-
-  res.json(tasks.map(formatTask));
+  const sql = `SELECT * FROM tasks${conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''} ORDER BY id`;
+  const { rows } = await pool.query(sql, params);
+  res.json(rows);
 });
 
-// ============================================================
-// Extras — Stats
-// ============================================================
-
-app.get('/stats', (req, res) => {
-  const total = db.prepare(
-    'SELECT COUNT(*) AS count FROM tasks'
-  ).get().count;
-
-  const done = db.prepare(
-    'SELECT COUNT(*) AS count FROM tasks WHERE done = ?'
-  ).get(1).count;
-
-  res.json({
-    total,
-    done,
-    open: total - done,
-  });
+app.get('/stats', async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE done = TRUE)::int AS done
+    FROM tasks
+  `);
+  res.json({ total: rows[0].total, done: rows[0].done, open: rows[0].total - rows[0].done });
 });
 
-// ============================================================
-// Reset database to original 3 tasks
-// ============================================================
-
-app.post('/reset', (req, res) => {
-  const resetTasks = db.transaction(() => {
-    db.prepare('DELETE FROM tasks').run();
-    const insert = db.prepare(
-      'INSERT INTO tasks (title, done) VALUES (?, ?)'
+app.post('/reset', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM tasks');
+    await client.query(
+      `INSERT INTO tasks (title, done) VALUES ($1, $2), ($3, $4), ($5, $6)`,
+      ['Buy groceries', false, 'Walk the dog', true, 'Read a book', false]
     );
-    insert.run('Buy groceries', 0);
-    insert.run('Walk the dog', 1);
-    insert.run('Read a book', 0);
-  });
-  resetTasks();
-  const tasks = db.prepare('SELECT * FROM tasks').all();
-
-  res.json(tasks.map(formatTask));
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+  const { rows } = await pool.query('SELECT * FROM tasks ORDER BY id');
+  res.json(rows);
 });
 
-// ============================================================
-// Stage 2 — CREATE task
-// ============================================================
-
-app.post('/tasks', (req, res) => {
+app.post('/tasks', async (req, res) => {
   const { title } = req.body ?? {};
-
-  if (
-    title === undefined ||
-    title === null ||
-    String(title).trim() === ''
-  ) {
-    return res.status(400).json({
-      error: 'title is required and cannot be empty',
-    });
+  if (title === undefined || title === null || String(title).trim() === '') {
+    return res.status(400).json({ error: 'title is required and cannot be empty' });
   }
-
-  const cleanTitle = String(title).trim();
-
-  const result = db.prepare(
-    'INSERT INTO tasks (title, done) VALUES (?, ?)'
-  ).run(cleanTitle, 0);
-
-  const task = db.prepare(
-    'SELECT * FROM tasks WHERE id = ?'
-  ).get(result.lastInsertRowid);
-
-  res.status(201).json(formatTask(task));
+  const { rows } = await pool.query(
+    'INSERT INTO tasks (title, done) VALUES ($1, $2) RETURNING *',
+    [String(title).trim(), false]
+  );
+  res.status(201).json(rows[0]);
 });
 
-// ============================================================
-// Stage 1 — READ one task
-// ============================================================
-
-app.get('/tasks/:id', (req, res) => {
+app.get('/tasks/:id', async (req, res) => {
   const id = Number(req.params.id);
-
-  const task = db.prepare(
-    'SELECT * FROM tasks WHERE id = ?'
-  ).get(id);
-
-  if (!task) {
-    return res.status(404).json({
-      error: `Task ${id} not found`,
-    });
-  }
-
-  res.json(formatTask(task));
+  if (!Number.isInteger(id) || id < 1) return res.status(404).json({ error: `Task ${req.params.id} not found` });
+  const { rows } = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
+  if (!rows.length) return res.status(404).json({ error: `Task ${id} not found` });
+  res.json(rows[0]);
 });
 
-// ============================================================
-// Stage 3 — UPDATE task
-// ============================================================
-
-app.put('/tasks/:id', (req, res) => {
+app.put('/tasks/:id', async (req, res) => {
   const id = Number(req.params.id);
-
-  const existingTask = db.prepare(
-    'SELECT * FROM tasks WHERE id = ?'
-  ).get(id);
-
-  if (!existingTask) {
-    return res.status(404).json({
-      error: `Task ${id} not found`,
-    });
-  }
-
+  if (!Number.isInteger(id) || id < 1) return res.status(404).json({ error: `Task ${req.params.id} not found` });
   const body = req.body ?? {};
-
-  const hasTitle =
-    Object.prototype.hasOwnProperty.call(body, 'title');
-
-  const hasDone =
-    Object.prototype.hasOwnProperty.call(body, 'done');
-
-  if (!hasTitle && !hasDone) {
-    return res.status(400).json({
-      error: 'request body must include title and/or done',
-    });
+  const hasTitle = Object.prototype.hasOwnProperty.call(body, 'title');
+  const hasDone = Object.prototype.hasOwnProperty.call(body, 'done');
+  if (!hasTitle && !hasDone) return res.status(400).json({ error: 'request body must include title and/or done' });
+  if (hasTitle && (body.title === null || String(body.title).trim() === '')) {
+    return res.status(400).json({ error: 'title cannot be empty' });
   }
-
-  let newTitle = existingTask.title;
-  let newDone = existingTask.done;
-
-  if (hasTitle) {
-    if (
-      body.title === null ||
-      String(body.title).trim() === ''
-    ) {
-      return res.status(400).json({
-        error: 'title cannot be empty',
-      });
-    }
-
-    newTitle = String(body.title).trim();
-  }
-
-  if (hasDone) {
-    if (typeof body.done !== 'boolean') {
-      return res.status(400).json({
-        error: 'done must be a boolean',
-      });
-    }
-
-    newDone = body.done ? 1 : 0;
-  }
-
-  db.prepare(`
-    UPDATE tasks
-    SET title = ?, done = ?
-    WHERE id = ?
-  `).run(newTitle, newDone, id);
-
-  const updatedTask = db.prepare(
-    'SELECT * FROM tasks WHERE id = ?'
-  ).get(id);
-
-  res.json(formatTask(updatedTask));
+  if (hasDone && typeof body.done !== 'boolean') return res.status(400).json({ error: 'done must be a boolean' });
+  const values = [];
+  const sets = [];
+  if (hasTitle) { values.push(String(body.title).trim()); sets.push(`title = $${values.length}`); }
+  if (hasDone) { values.push(body.done); sets.push(`done = $${values.length}`); }
+  values.push(id);
+  const { rows } = await pool.query(
+    `UPDATE tasks SET ${sets.join(', ')} WHERE id = $${values.length} RETURNING *`, values
+  );
+  if (!rows.length) return res.status(404).json({ error: `Task ${id} not found` });
+  res.json(rows[0]);
 });
 
-// ============================================================
-// Stage 3 — DELETE task
-// ============================================================
-
-app.delete('/tasks/:id', (req, res) => {
+app.delete('/tasks/:id', async (req, res) => {
   const id = Number(req.params.id);
-
-  const result = db.prepare(
-    'DELETE FROM tasks WHERE id = ?'
-  ).run(id);
-
-  if (result.changes === 0) {
-    return res.status(404).json({
-      error: `Task ${id} not found`,
-    });
-  }
-
+  if (!Number.isInteger(id) || id < 1) return res.status(404).json({ error: `Task ${req.params.id} not found` });
+  const result = await pool.query('DELETE FROM tasks WHERE id = $1', [id]);
+  if (result.rowCount === 0) return res.status(404).json({ error: `Task ${id} not found` });
   res.status(204).send();
 });
 
-// ============================================================
-// Start server
-// ============================================================
-
 if (require.main === module) {
-  app.listen(port, () => {
-    console.log(`CRUD API listening on port ${port}`);
-    console.log(`SQLite database: ${databasePath}`);
-    console.log(`Swagger UI: http://localhost:${port}/docs`);
-  });
+  initializeDatabase()
+    .then(() => app.listen(port, () => console.log(`Task API listening on port ${port}; PostgreSQL connected`)))
+    .catch((error) => { console.error('Failed to initialize PostgreSQL:', error); process.exit(1); });
 }
 
-module.exports = { app, db };
+module.exports = { app, pool, initializeDatabase };

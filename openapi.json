@@ -3,7 +3,7 @@
   "info": {
     "title": "Task API",
     "version": "2.0.0",
-    "description": "SQLite-backed CRUD API for tasks. Data is stored persistently in tasks.db."
+    "description": "PostgreSQL-backed CRUD API for tasks. Data is stored persistently in PostgreSQL."
   },
   "servers": [
     {
