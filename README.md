@@ -1,10 +1,10 @@
-# Task API — SQLite-backed CRUD
+# Task API â€” SQLite-backed CRUD
 
 A Node.js + Express task-management API. This Week 3 update replaces in-memory storage with **SQLite** using `better-sqlite3`, while keeping the core CRUD endpoints and JSON response format.
 
 ## Features
 
-- Persistent SQLite database (`tasks.db`) — tasks survive server restarts.
+- Persistent SQLite database (`tasks.db`) â€” tasks survive server restarts.
 - Automatic database file and `tasks` table creation.
 - Three starter tasks are inserted only when the table is empty.
 - Parameterized SQL queries (`?`) for user-provided values.
@@ -20,7 +20,7 @@ A Node.js + Express task-management API. This Week 3 update replaces in-memory s
 ## Getting started
 
 ```bash
-git clone https://github.com/flyrank-bih/BE-A1-First-CRUD-API.git
+git clone https://github.com/rahul-10thakur/BE-A1-First-CRUD-API.git
 cd BE-A1-First-CRUD-API
 npm install
 npm start
@@ -103,8 +103,8 @@ A successful delete returns `204 No Content` with an empty response body.
 
 ### Error responses
 
-- `400 Bad Request` — missing/empty title, invalid `done`, or invalid query parameter.
-- `404 Not Found` — task ID does not exist.
+- `400 Bad Request` â€” missing/empty title, invalid `done`, or invalid query parameter.
+- `404 Not Found` â€” task ID does not exist.
 
 Example:
 
@@ -130,7 +130,7 @@ For example, `SELECT * FROM tasks WHERE done = 1;` returns only completed tasks.
 2. Create a task using `POST /tasks`.
 3. Stop the server (`Ctrl + C`).
 4. Start it again using `npm start`.
-5. Call `GET /tasks` — the created task is still present.
+5. Call `GET /tasks` â€” the created task is still present.
 
 To verify a clean setup, stop the server and delete `tasks.db`. Start the app again; SQLite recreates the file, table and three seed tasks automatically.
 
