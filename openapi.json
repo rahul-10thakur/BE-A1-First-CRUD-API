@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Task API",
-    "version": "1.0",
-    "description": "In-memory CRUD API for tasks."
+    "version": "2.0.0",
+    "description": "SQLite-backed CRUD API for tasks. Data is stored persistently in tasks.db."
   },
   "servers": [
     {
@@ -275,7 +275,11 @@
     "schemas": {
       "Task": {
         "type": "object",
-        "required": ["id", "title", "done"],
+        "required": [
+          "id",
+          "title",
+          "done"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -293,7 +297,9 @@
       },
       "CreateTaskRequest": {
         "type": "object",
-        "required": ["title"],
+        "required": [
+          "title"
+        ],
         "properties": {
           "title": {
             "type": "string",
@@ -317,7 +323,9 @@
       },
       "Error": {
         "type": "object",
-        "required": ["error"],
+        "required": [
+          "error"
+        ],
         "properties": {
           "error": {
             "type": "string"
@@ -326,7 +334,11 @@
       },
       "Stats": {
         "type": "object",
-        "required": ["total", "done", "open"],
+        "required": [
+          "total",
+          "done",
+          "open"
+        ],
         "properties": {
           "total": {
             "type": "integer",

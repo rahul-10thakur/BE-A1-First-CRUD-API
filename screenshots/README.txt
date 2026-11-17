@@ -1,0 +1,1 @@
+Save your genuine DB Browser for SQLite screenshot here as tasks-db.png. Show the opened tasks.db file, Browse Data tab, tasks table, and its rows. Capture this on your own computer; no mock image is included.
