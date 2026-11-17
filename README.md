@@ -129,7 +129,7 @@ docker compose exec db psql -U postgres -d tasks -c "\\dt"
 docker compose exec db psql -U postgres -d tasks -c "SELECT * FROM tasks ORDER BY id;"
 ```
 
-Capture a genuine terminal screenshot showing the `tasks` table and its rows, and save it as `screenshots/tasks-postgres.png` before submitting. Do not use a mock screenshot.
+Capture a genuine terminal screenshot showing the `tasks` table and its rows, and save it as `screenshots/postgres-tasks.png` before submitting. Do not use a mock screenshot.
 
 ## Run locally without the API container (optional)
 
@@ -159,4 +159,4 @@ Commit after each completed assignment stage (Stages 0–5), using messages that
 
 ## Screenshot
 
-Save the actual PostgreSQL inspection screenshot at `screenshots/tasks-postgres.png`. The repository's screenshot must show the real `tasks` table and rows from your running container.
+Save the actual PostgreSQL inspection screenshot at `screenshots/postgres-tasks.png`. The repository's screenshot must show the real `tasks` table and rows from your running container.
